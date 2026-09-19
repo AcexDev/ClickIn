@@ -14,11 +14,17 @@ message — that is intentional and should stay that way.
 from dataclasses import dataclass
 
 from app.scoring import ScoringResult, Severity
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+SURPIN_NUMBER = os.getenv("SURPIN_NUMBER")
 
 SURPIN_URL = "https://www.surpinng.com/"
-SURPIN_MTN_NUMBER = "+2349163114032"
-SURPIN_9MOBILE_NUMBER = "+2349080217555"
-SURPIN_HAUSA_NUMBER = "+2348142241007"
+SURPIN_MTN_NUMBER = SURPIN_NUMBER
+SURPIN_9MOBILE_NUMBER = SURPIN_NUMBER
+SURPIN_HAUSA_NUMBER = SURPIN_NUMBER
 
 TIER_1_MINIMAL_MILD = (
     "Thanks for checking in. Based on your answers, you're not showing signs of "
