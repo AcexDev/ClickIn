@@ -26,6 +26,7 @@ from app.db import init_db
 from app.questions import ANSWER_SCALE
 from dotenv import load_dotenv
 from flask_cors import CORS
+from app import session_store as store
 
 load_dotenv()
 
@@ -168,13 +169,23 @@ def _handle_message(message: dict) -> None:
         _handle_counselor_reply(message)
         return
 
-    # Checking for the literal "/start" command text is not PII -- it's an
-    # instruction, not personal data -- so this doesn't violate the
-    # no-PII-logging rule above. We don't log or store the text, just
-    # compare it.
     text = (message.get("text") or "").strip().lower()
     if text == "/start":
-        _post_telegram("sendMessage", {"chat_id": chat_id, "text": WELCOME_MESSAGE})
+        store.expire_stale_sessions()
+        existing_session = store.get_active_session(chat_id)
+        if existing_session is None:
+            # Genuinely new (or fully expired) -- show the welcome screen.
+            _post_telegram("sendMessage", {
+                "chat_id": chat_id,
+                "text": WELCOME_MESSAGE,
+                "reply_markup": {
+                    "inline_keyboard": [[{"text": "Start Check-In", "callback_data": "begin_quiz"}]]
+                },
+            })
+            return
+        # Already mid-quiz -- skip the welcome screen, just resend where
+        # they left off. Falls through to the same logic as any other
+        # message below.
 
     session = conv.get_or_start_session(chat_id)
     if session["status"] != "in_progress":
@@ -183,8 +194,7 @@ def _handle_message(message: dict) -> None:
     next_q = conv.current_question(session)
     if next_q is not None:
         send_question(chat_id, next_q)
-
-
+        
 def clear_keyboard(chat_id: int, message_id: int) -> None:
     """Strips the inline keyboard off an already-answered question message,
     so a physical double-tap on the old buttons has nothing left to hit."""
@@ -207,7 +217,17 @@ def _handle_callback_query(callback_query: dict) -> None:
     if callback_query_id:
         answer_callback_query(callback_query_id)
 
-    if chat_id is None or not data.startswith("ans:"):
+    if chat_id is None:
+        return
+
+    if data == "begin_quiz":
+        session = conv.get_or_start_session(chat_id)
+        next_q = conv.current_question(session)
+        if next_q is not None:
+            send_question(chat_id, next_q)
+        return
+
+    if not data.startswith("ans:"):
         return
 
     try:
@@ -227,13 +247,9 @@ def _handle_callback_query(callback_query: dict) -> None:
             send_question(chat_id, current)
         return
 
-    # Always clear the tapped message's keyboard, whether this tap won the
-    # race or was a duplicate -- either way that question is settled now.
     clear_keyboard(chat_id, message_id)
 
     if result is None:
-        # Losing duplicate/racing tap -- the winning tap already advanced
-        # the session and sent whatever comes next. Nothing more to do.
         return
 
     if isinstance(result, conv.NextQuestion):
@@ -242,7 +258,7 @@ def _handle_callback_query(callback_query: dict) -> None:
         send_outcome(chat_id, result.outcome)
         if result.outcome.triggers_peer_relay:
             notify_peer_relay(result.session_id, chat_id)
-
+            
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = request.get_json(silent=True) or {}
