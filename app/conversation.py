@@ -13,6 +13,8 @@ from app import session_store as store
 from app.escalation import EscalationOutcome, route
 from app.questions import ALL_QUESTIONS
 from app.scoring import score
+from app.questions import ALL_QUESTIONS, DEMOGRAPHIC_QUESTIONS
+from app import session_store as store
 
 
 class SessionMismatchError(ValueError):
@@ -103,3 +105,47 @@ def handle_answer(session: dict, question_id: str, value: int) -> NextQuestion |
         question_number=next_index + 1,
         total_questions=len(ALL_QUESTIONS),
     )
+
+@dataclass(frozen=True)
+class NextDemographicQuestion:
+    question: dict
+    question_number: int
+    total_questions: int
+
+
+def current_demographic_question(session: dict) -> NextDemographicQuestion | None:
+    """
+    Demographic questions run before the 16-item battery. Tracked via a
+    separate `demo_question_index` on the session row so it doesn't collide
+    with `current_question_index` (which stays reserved for the PHQ/GAD flow).
+    """
+    idx = session.get("demo_question_index", 0)
+    if idx >= len(DEMOGRAPHIC_QUESTIONS):
+        return None
+    return NextDemographicQuestion(
+        question=DEMOGRAPHIC_QUESTIONS[idx],
+        question_number=idx + 1,
+        total_questions=len(DEMOGRAPHIC_QUESTIONS),
+    )
+
+
+def handle_demographic_answer(session: dict, question_id: str, value: str | None) -> NextDemographicQuestion | None:
+    """
+    value=None means the student tapped "Skip". Records into `demographics`
+    only if a value was actually given -- skipped fields just stay NULL.
+    Returns the next demographic question, or None once all 3 are done
+    (caller should then move on to current_question() for Q1).
+    """
+    expected = current_demographic_question(session)
+    if expected is None or expected.question["id"] != question_id:
+        raise SessionMismatchError(
+            f"Session {session['session_id']} expected a different demographic question than {question_id!r}"
+        )
+
+    if value is not None:
+        store.record_demographic_answer(session["session_id"], question_id, value)
+
+    store.advance_demographic_index(session["session_id"])
+    session["demo_question_index"] = session.get("demo_question_index", 0) + 1
+
+    return current_demographic_question(session)

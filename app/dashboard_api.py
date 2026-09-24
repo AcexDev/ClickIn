@@ -20,7 +20,11 @@ from functools import wraps
 
 from flask import Blueprint, jsonify, request
 
-from app.analytics import get_daily_completed_counts, get_summary_stats
+from app.analytics import (get_daily_completed_counts, get_summary_stats,
+                           get_item_level_breakdown, get_demographic_breakdown, get_comorbidity_matrix)
+from app.analytics import (get_daily_completed_counts, get_summary_stats,
+                           get_item_level_breakdown, get_demographic_breakdown, get_comorbidity_matrix,
+                           get_correlation_stats, get_response_quality_stats)
 
 logger = logging.getLogger("dashboard_api")
 
@@ -83,3 +87,48 @@ def daily_stats():
     """?days=30 (default) -- trend data for a chart, oldest day first."""
     days = int(request.args.get("days", 30))
     return jsonify(get_daily_completed_counts(days=days))
+
+@dashboard_bp.route("/stats/symptoms", methods=["GET"])
+@require_admin_key
+def symptom_breakdown():
+    return jsonify(get_item_level_breakdown())
+
+
+@dashboard_bp.route("/stats/demographics/<axis>", methods=["GET"])
+@require_admin_key
+def demographic_breakdown(axis):
+    try:
+        return jsonify(get_demographic_breakdown(axis))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@dashboard_bp.route("/stats/comorbidity", methods=["GET"])
+@require_admin_key
+def comorbidity():
+    return jsonify(get_comorbidity_matrix())
+
+
+@dashboard_bp.route("/stats/correlation", methods=["GET"])
+@require_admin_key
+def correlation():
+    result = get_correlation_stats()
+    if result is None:
+        return jsonify({"error": "insufficient data"}), 200
+    return jsonify(result)
+
+
+@dashboard_bp.route("/stats/quality", methods=["GET"])
+@require_admin_key
+def quality():
+    return jsonify(get_response_quality_stats())
+
+from app.analytics import get_symptom_breakdown_by_axis  # add to existing import line
+
+@dashboard_bp.route("/stats/symptoms/<axis>", methods=["GET"])
+@require_admin_key
+def symptom_breakdown_by_axis(axis):
+    try:
+        return jsonify(get_symptom_breakdown_by_axis(axis))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400

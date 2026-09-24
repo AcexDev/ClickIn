@@ -23,6 +23,7 @@ class ScoringResult:
     phq9_total: int
     gad7_total: int
     phq9_band: str
+    gad7_band: str          # <-- new field
     self_harm_override: bool
     severity: Severity
 
@@ -104,6 +105,7 @@ def score(answers: dict) -> ScoringResult:
         phq9_total=phq9_total,
         gad7_total=gad7_total,
         phq9_band=phq9_band,
+        gad7_band=gad7_band,    # <-- new line
         self_harm_override=self_harm_override,
         severity=severity,
     )
