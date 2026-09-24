@@ -125,16 +125,49 @@ def complete_session(session_id: str, scoring_result) -> None:
             (now, session_id),
         )
         conn.execute(
-            """INSERT INTO results
-               (session_id, phq9_total, gad7_total, phq9_band, self_harm_override, severity, scored_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                session_id,
-                scoring_result.phq9_total,
-                scoring_result.gad7_total,
-                scoring_result.phq9_band,
-                int(scoring_result.self_harm_override),
-                scoring_result.severity.value,
-                now,
-            ),
+                """INSERT INTO results
+                (session_id, phq9_total, gad7_total, phq9_band, gad7_band, self_harm_override, severity, scored_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    scoring_result.phq9_total,
+                    scoring_result.gad7_total,
+                    scoring_result.phq9_band,
+                    scoring_result.gad7_band,
+                    int(scoring_result.self_harm_override),
+                    scoring_result.severity.value,
+                    now,
+                ),
+            )
+
+def save_demographics(session_id: str, faculty: str | None, gender: str | None, hall: str | None) -> None:
+    """Upserts optional demographic fields. Any/all may be None if the student skipped."""
+    with get_connection() as conn:
+        conn.execute(
+            """INSERT INTO demographics (session_id, faculty, gender, hall_of_residence)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(session_id)
+               DO UPDATE SET faculty = excluded.faculty,
+                             gender = excluded.gender,
+                             hall_of_residence = excluded.hall_of_residence""",
+            (session_id, faculty, gender, hall),
+        )
+
+def advance_demographic_index(session_id: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE sessions SET demo_question_index = demo_question_index + 1 WHERE session_id = ?",
+            (session_id,),
+        )
+
+
+def record_demographic_answer(session_id: str, question_id: str, value: str) -> None:
+    """question_id is one of demo_faculty / demo_gender / demo_hall."""
+    field = {"demo_faculty": "faculty", "demo_gender": "gender", "demo_hall": "hall_of_residence"}[question_id]
+    with get_connection() as conn:
+        conn.execute(
+            f"""INSERT INTO demographics (session_id, {field})
+                VALUES (?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET {field} = excluded.{field}""",
+            (session_id, value),
         )

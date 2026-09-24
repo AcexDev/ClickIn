@@ -206,6 +206,12 @@ def clear_keyboard(chat_id: int, message_id: int) -> None:
         "reply_markup": {"inline_keyboard": []},
     })
 
+def send_demographic_question(chat_id: int, next_q: conv.NextDemographicQuestion) -> None:
+    q = next_q.question
+    buttons = [[{"text": opt, "callback_data": f"demo:{q['id']}:{opt}"}] for opt in q["options"]]
+    buttons.append([{"text": "Skip", "callback_data": f"demo:{q['id']}:__skip__"}])
+    text = f"({next_q.question_number}/{next_q.total_questions}) {q['text']}"
+    _post_telegram("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": {"inline_keyboard": buttons}})
 
 def _handle_callback_query(callback_query: dict) -> None:
     callback_query_id = callback_query.get("id")
@@ -222,9 +228,41 @@ def _handle_callback_query(callback_query: dict) -> None:
 
     if data == "begin_quiz":
         session = conv.get_or_start_session(chat_id)
+        next_demo = conv.current_demographic_question(session)
+        if next_demo is not None:
+            send_demographic_question(chat_id, next_demo)
+            return
         next_q = conv.current_question(session)
         if next_q is not None:
             send_question(chat_id, next_q)
+        return
+
+    if data.startswith("demo:"):
+        try:
+            _, question_id, raw_value = data.split(":", 2)
+        except ValueError:
+            logger.warning("Malformed demographic callback_data received; dropping")
+            return
+        value = None if raw_value == "__skip__" else raw_value
+
+        session = conv.get_or_start_session(chat_id)
+
+        try:
+            next_demo = conv.handle_demographic_answer(session, question_id, value)
+        except conv.SessionMismatchError:
+            current = conv.current_demographic_question(session)
+            if current is not None:
+                send_demographic_question(chat_id, current)
+            return
+
+        clear_keyboard(chat_id, message_id)
+
+        if next_demo is not None:
+            send_demographic_question(chat_id, next_demo)
+        else:
+            next_q = conv.current_question(session)
+            if next_q is not None:
+                send_question(chat_id, next_q)
         return
 
     if not data.startswith("ans:"):
@@ -258,7 +296,7 @@ def _handle_callback_query(callback_query: dict) -> None:
         send_outcome(chat_id, result.outcome)
         if result.outcome.triggers_peer_relay:
             notify_peer_relay(result.session_id, chat_id)
-            
+                        
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = request.get_json(silent=True) or {}
@@ -285,3 +323,4 @@ if __name__ == "__main__":
             "webhook: export TELEGRAM_BOT_TOKEN=your_token_here"
         )
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
